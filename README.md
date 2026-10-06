@@ -13,7 +13,7 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (21 passing tests, `pytest`):
+Implemented and tested (26 passing tests, `pytest`):
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence
@@ -24,21 +24,24 @@ Implemented and tested (21 passing tests, `pytest`):
 - Model provider abstraction (`ModelProvider` protocol) with an Anthropic
   implementation and a Null fallback — AI-assisted analysis degrades to
   "UNKNOWN", never to a fabricated answer, when no API key is configured.
-- First analyzers: static route extraction (API catalog) for
+- Analyzers: static route extraction (API catalog) for
   Express/FastAPI/Flask-style route declarations; architecture/component
   inference from discovered directory structure, with a generated Mermaid
-  diagram.
+  diagram; database analyzer (engine + ORM/ODM from declared dependencies,
+  migrations from the priority plan + `alembic.ini`, table/column schema
+  for SQLAlchemy declarative models and Prisma schema files).
 - Gap/Unknown detector covering every major question the spec asks (§2).
 - Documentation generator: renders the full 19-section report from
   structured knowledge only — no second LLM pass hallucinating prose.
 - CLI (`codeatlas analyze <path>`) and SQLite/file-based persistence.
 
 **Not yet implemented** (tracked, not hidden — see `ARCHITECTURE.md` §10,
-§12): business rules, database schema, auth/authz, external integrations,
-coding standards, and dependency-intelligence analyzers; LLM-assisted
-analysis (the plumbing exists, no analyzer calls it yet); OpenAPI spec
-parsing; incremental re-analysis as a CLI command; human review/correction
-workflow.
+§12): business rules, auth/authz, external integrations, coding
+standards, and dependency-intelligence analyzers; Django ORM/Mongoose
+table-schema parsing (engine/ORM identity for them is detected, columns
+are not); LLM-assisted analysis (the plumbing exists, no analyzer calls
+it yet); OpenAPI spec parsing; incremental re-analysis as a CLI command;
+human review/correction workflow.
 
 ## Quick start
 
