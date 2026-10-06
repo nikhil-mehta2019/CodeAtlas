@@ -14,6 +14,7 @@ from pathlib import Path
 
 from codeatlas.analysis.api_catalog import analyze_api_catalog
 from codeatlas.analysis.architecture import analyze_architecture
+from codeatlas.analysis.database import analyze_database
 from codeatlas.discovery.engine import DiscoveryEngine
 from codeatlas.documentation.generator import generate_markdown
 from codeatlas.evidence.schema import Evidence, VerificationStatus, evidence_to_ref
@@ -59,6 +60,12 @@ class Orchestrator:
             comp_evs = [e for e in arch_evidence if e.finding_id == f"architecture:layer:{comp.kind}"]
             comp.evidence = [evidence_to_ref(e) for e in comp_evs]
 
+        database_model, db_evidence = analyze_database(ctx, walker)
+        all_evidence += db_evidence
+        for table in database_model.tables:
+            table_evs = [e for e in db_evidence if e.finding_id == f"database:table:{table.name}:{table.source_file}"]
+            table.evidence = [evidence_to_ref(e) for e in table_evs]
+
         deployment = self._build_deployment(ctx)
         existing_tests = TestInventory(
             frameworks=ctx.result.test_frameworks,
@@ -76,6 +83,7 @@ class Orchestrator:
             architecture=architecture,
             components=components,
             api_catalog=api_endpoints,
+            database_model=database_model,
             dependencies=ctx.result.dependencies,
             deployment=deployment,
             existing_tests=existing_tests,
