@@ -194,6 +194,10 @@ def _section_database(k: ProjectKnowledge) -> str:
 def _section_auth(k: ProjectKnowledge) -> str:
     lines = ["## 10. Authentication & Authorization"]
     lines += _fmt_finding("Authentication mechanism", k.authentication.mechanism)
+    if k.authentication.token_handling:
+        lines.append(f"- Token handling: {k.authentication.token_handling}")
+    if k.authentication.password_handling:
+        lines.append(f"- Password handling: {k.authentication.password_handling}")
     lines += _fmt_finding("Authorization model", k.authorization.model)
     if k.authorization.roles:
         lines.append(f"- Roles observed: {', '.join(k.authorization.roles)}")

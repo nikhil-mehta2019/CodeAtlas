@@ -280,14 +280,19 @@ CodeAtlas/
    - **Database model: done.** `codeatlas/analysis/database.py` detects
      engine + ORM/ODM from declared dependencies, migrations from the
      existing priority plan + `alembic.ini`, and table/column schema for
-     SQLAlchemy declarative models and Prisma schema files. Still open in
-     M7: business rules, auth, authorization, integrations, coding
-     standards, deployment depth, dependency intelligence.
+     SQLAlchemy declarative models and Prisma schema files.
+   - **Authentication & authorization: done.** `codeatlas/analysis/authentication.py`
+     detects the auth mechanism (JWT/OAuth2/session) from dependency names
+     and direct JWT call-site scanning, password-hashing library usage,
+     and a role/permission-check scan feeding an RBAC-vs-ad-hoc
+     authorization classification. Still open in M7: business rules,
+     integrations, coding standards, deployment depth, dependency
+     intelligence.
 8. **M8 — Real-world validation** against the project types listed in
    spec §28.
 
-M1-M6 and the database slice of M7 are implemented and tested; the rest
-of M7 is in progress.
+M1-M6 and the database + authentication slices of M7 are implemented and
+tested; the rest of M7 is in progress.
 
 ## 11. Major Technical Risks
 
