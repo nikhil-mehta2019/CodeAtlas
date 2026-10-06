@@ -213,6 +213,11 @@ def _section_integrations(k: ProjectKnowledge) -> str:
     for i in k.external_integrations:
         badge = _STATUS_EMOJI.get(i.status.value, "")
         lines.append(f"- **{i.provider}** ({i.purpose}) {badge} *{i.status.value}* (confidence: {i.confidence:.0%})")
+        if i.api:
+            lines.append(f"  - API: {i.api}")
+        lines.append(f"  - Webhook: {'yes' if i.webhook else 'not detected'}")
+        if i.configuration_keys:
+            lines.append(f"  - Configuration keys: {', '.join(f'`{key}`' for key in i.configuration_keys)}")
     return "\n".join(lines)
 
 

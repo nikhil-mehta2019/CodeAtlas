@@ -285,14 +285,22 @@ CodeAtlas/
      detects the auth mechanism (JWT/OAuth2/session) from dependency names
      and direct JWT call-site scanning, password-hashing library usage,
      and a role/permission-check scan feeding an RBAC-vs-ad-hoc
-     authorization classification. Still open in M7: business rules,
-     integrations, coding standards, deployment depth, dependency
-     intelligence.
+     authorization classification.
+   - **External integrations: done.** `codeatlas/analysis/integrations.py`
+     detects third-party providers (payment, email, SMS/video, team
+     messaging, cloud storage, auth providers, message queues) from
+     declared dependency names, attributes webhook routes only when a
+     route both says "webhook" and names the provider, and matches
+     config-file key *names* (never values) to a provider. Broad,
+     multi-purpose SDKs (`boto3`, `aws-sdk`) confirm the provider but not
+     a specific purpose, so they're INFERRED rather than CONFIRMED. Still
+     open in M7: business rules, coding standards, deployment depth,
+     dependency intelligence.
 8. **M8 — Real-world validation** against the project types listed in
    spec §28.
 
-M1-M6 and the database + authentication slices of M7 are implemented and
-tested; the rest of M7 is in progress.
+M1-M6 and the database, authentication, and integrations slices of M7
+are implemented and tested; the rest of M7 is in progress.
 
 ## 11. Major Technical Risks
 
