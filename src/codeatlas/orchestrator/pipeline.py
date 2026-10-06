@@ -16,6 +16,7 @@ from codeatlas.analysis.api_catalog import analyze_api_catalog
 from codeatlas.analysis.architecture import analyze_architecture
 from codeatlas.analysis.authentication import analyze_authentication
 from codeatlas.analysis.database import analyze_database
+from codeatlas.analysis.integrations import analyze_integrations, provider_token
 from codeatlas.discovery.engine import DiscoveryEngine
 from codeatlas.documentation.generator import generate_markdown
 from codeatlas.evidence.schema import Evidence, VerificationStatus, evidence_to_ref
@@ -70,6 +71,13 @@ class Orchestrator:
         authentication, authorization, auth_evidence = analyze_authentication(ctx, walker)
         all_evidence += auth_evidence
 
+        external_integrations, integration_evidence = analyze_integrations(ctx, walker)
+        all_evidence += integration_evidence
+        for integration in external_integrations:
+            token = provider_token(integration.provider)
+            integration_evs = [e for e in integration_evidence if e.finding_id == f"integration:{token}"]
+            integration.evidence = [evidence_to_ref(e) for e in integration_evs]
+
         deployment = self._build_deployment(ctx)
         existing_tests = TestInventory(
             frameworks=ctx.result.test_frameworks,
@@ -90,6 +98,7 @@ class Orchestrator:
             database_model=database_model,
             authentication=authentication,
             authorization=authorization,
+            external_integrations=external_integrations,
             dependencies=ctx.result.dependencies,
             deployment=deployment,
             existing_tests=existing_tests,

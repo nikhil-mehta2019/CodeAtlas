@@ -13,7 +13,7 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (32 passing tests, `pytest`):
+Implemented and tested (36 passing tests, `pytest`):
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence
@@ -33,16 +33,19 @@ Implemented and tested (32 passing tests, `pytest`):
   authentication/authorization analyzer (JWT/OAuth2/session mechanism
   from dependencies and JWT call-site scanning, password-hashing library
   usage, and an RBAC-vs-ad-hoc authorization classification from
-  role/permission-check scanning).
+  role/permission-check scanning); external integrations analyzer
+  (third-party providers from declared dependencies, webhook attribution
+  only when a route names both "webhook" and the provider, config-file
+  key *names* matched to a provider — values are never captured).
 - Gap/Unknown detector covering every major question the spec asks (§2).
 - Documentation generator: renders the full 19-section report from
   structured knowledge only — no second LLM pass hallucinating prose.
 - CLI (`codeatlas analyze <path>`) and SQLite/file-based persistence.
 
 **Not yet implemented** (tracked, not hidden — see `ARCHITECTURE.md` §10,
-§12): business rules, external integrations, coding standards, and
-dependency-intelligence analyzers; Django ORM/Mongoose table-schema
-parsing (engine/ORM identity for them is detected, columns are not);
+§12): business rules, coding standards, and dependency-intelligence
+analyzers; Django ORM/Mongoose table-schema parsing (engine/ORM identity
+for them is detected, columns are not);
 API-key authentication detection; LLM-assisted analysis (the plumbing
 exists, no analyzer calls it yet); OpenAPI spec parsing; incremental
 re-analysis as a CLI command;
