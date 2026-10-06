@@ -15,6 +15,7 @@ from pathlib import Path
 from codeatlas.analysis.api_catalog import analyze_api_catalog
 from codeatlas.analysis.architecture import analyze_architecture
 from codeatlas.analysis.authentication import analyze_authentication
+from codeatlas.analysis.business_rules import analyze_business_rules
 from codeatlas.analysis.database import analyze_database
 from codeatlas.analysis.integrations import analyze_integrations, provider_token
 from codeatlas.discovery.engine import DiscoveryEngine
@@ -78,6 +79,11 @@ class Orchestrator:
             integration_evs = [e for e in integration_evidence if e.finding_id == f"integration:{token}"]
             integration.evidence = [evidence_to_ref(e) for e in integration_evs]
 
+        business_rules, rule_evidence = analyze_business_rules(ctx, walker)
+        all_evidence += rule_evidence
+        for rule, ev in zip(business_rules, rule_evidence):
+            rule.evidence = [evidence_to_ref(ev)]
+
         deployment = self._build_deployment(ctx)
         existing_tests = TestInventory(
             frameworks=ctx.result.test_frameworks,
@@ -99,6 +105,7 @@ class Orchestrator:
             authentication=authentication,
             authorization=authorization,
             external_integrations=external_integrations,
+            business_rules=business_rules,
             dependencies=ctx.result.dependencies,
             deployment=deployment,
             existing_tests=existing_tests,
