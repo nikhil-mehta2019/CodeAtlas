@@ -14,6 +14,7 @@ from pathlib import Path
 
 from codeatlas.analysis.api_catalog import analyze_api_catalog
 from codeatlas.analysis.architecture import analyze_architecture
+from codeatlas.analysis.authentication import analyze_authentication
 from codeatlas.analysis.database import analyze_database
 from codeatlas.discovery.engine import DiscoveryEngine
 from codeatlas.documentation.generator import generate_markdown
@@ -66,6 +67,9 @@ class Orchestrator:
             table_evs = [e for e in db_evidence if e.finding_id == f"database:table:{table.name}:{table.source_file}"]
             table.evidence = [evidence_to_ref(e) for e in table_evs]
 
+        authentication, authorization, auth_evidence = analyze_authentication(ctx, walker)
+        all_evidence += auth_evidence
+
         deployment = self._build_deployment(ctx)
         existing_tests = TestInventory(
             frameworks=ctx.result.test_frameworks,
@@ -84,6 +88,8 @@ class Orchestrator:
             components=components,
             api_catalog=api_endpoints,
             database_model=database_model,
+            authentication=authentication,
+            authorization=authorization,
             dependencies=ctx.result.dependencies,
             deployment=deployment,
             existing_tests=existing_tests,
