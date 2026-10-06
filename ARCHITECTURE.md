@@ -293,14 +293,21 @@ CodeAtlas/
      route both says "webhook" and names the provider, and matches
      config-file key *names* (never values) to a provider. Broad,
      multi-purpose SDKs (`boto3`, `aws-sdk`) confirm the provider but not
-     a specific purpose, so they're INFERRED rather than CONFIRMED. Still
-     open in M7: business rules, coding standards, deployment depth,
-     dependency intelligence.
+     a specific purpose, so they're INFERRED rather than CONFIRMED.
+   - **Business rules: done, Python-only.** `codeatlas/analysis/business_rules.py`
+     detects explicit Pydantic `Field(...)` validation constraints,
+     role-gated business actions (reusing the role-decorator pattern
+     `authentication.py` already scans for, but phrased as a per-action
+     rule), and Enum-based state membership (never asserting which
+     transitions between states are valid). Node/TS validation-library
+     parsing (Joi/Zod/Yup) and JS route+role business rules are an
+     explicit, tracked gap, not implemented in this slice. Still open in
+     M7: coding standards, deployment depth, dependency intelligence.
 8. **M8 — Real-world validation** against the project types listed in
    spec §28.
 
-M1-M6 and the database, authentication, and integrations slices of M7
-are implemented and tested; the rest of M7 is in progress.
+M1-M6 and the database, authentication, integrations, and business-rules
+slices of M7 are implemented and tested; the rest of M7 is in progress.
 
 ## 11. Major Technical Risks
 
