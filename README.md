@@ -13,7 +13,7 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (61 passing tests, `pytest`):
+Implemented and tested (69 passing tests, `pytest`):
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence
@@ -57,9 +57,20 @@ Implemented and tested (61 passing tests, `pytest`):
 - Documentation generator: renders the full 19-section report from
   structured knowledge only — no second LLM pass hallucinating prose.
 - CLI (`codeatlas analyze <path>`) and SQLite/file-based persistence.
+- Web API layer (`codeatlas.web`, optional `[api]` extra): an initial
+  FastAPI skeleton — `GET /health` and `POST /analyze` wrapping the same
+  `Orchestrator` the CLI uses, returning the real `ProjectKnowledge` +
+  Markdown report as JSON. `repo_path` is resolved and confined under a
+  server-configured `CODEATLAS_API_ALLOWED_ROOT` (never trusted as
+  given, mirroring `RepositoryWalker`'s own path confinement at the
+  network boundary); the server fails closed (503) if that root isn't
+  configured, rather than defaulting to "anything on disk is fair game."
+  No auth, no upload/clone support, no job queue — see `ARCHITECTURE.md`
+  §13 for the full scope and trust-model reasoning.
 
 **Not yet implemented** (tracked, not hidden — see `ARCHITECTURE.md` §10,
-§12): Node/TS business rules and coding-standards conventions; outdated-
+§12, §13): repo upload/git-clone support and authentication for the web
+API; Node/TS business rules and coding-standards conventions; outdated-
 package detection, internal/workspace dependency classification, and
 version-range compatibility checking (the dependency analyzer only
 compares exact-pin-vs-exact-pin); Django ORM/Mongoose table-schema
@@ -83,6 +94,19 @@ No `ANTHROPIC_API_KEY` is required for any of the above — discovery and
 the current analyzers are 100% static. Set `ANTHROPIC_API_KEY` (and
 optionally `CODEATLAS_MODEL`) to make `codeatlas.llm.get_default_provider()`
 return a live Anthropic provider once LLM-assisted analyzers are added.
+
+### Web API (optional)
+
+```bash
+uv pip install -e ".[api]"
+export CODEATLAS_API_ALLOWED_ROOT=/path/to/a/directory/containing/repos
+uvicorn codeatlas.web.app:app --reload
+```
+
+`GET /health`, and `POST /analyze` with `{"repo_path": "some-repo-name"}`
+(resolved relative to `CODEATLAS_API_ALLOWED_ROOT`). See
+`ARCHITECTURE.md` §13 before exposing this beyond localhost — it has no
+authentication of its own.
 
 ## Layout
 
