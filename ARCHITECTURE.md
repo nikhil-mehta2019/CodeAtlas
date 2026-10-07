@@ -15,8 +15,15 @@ Documentation → Evidence → Unknown/Gap Detection
 
 V1 explicitly does **NOT** implement (see §14): test execution, browser
 automation, autonomous code fixing, performance/security test *execution*,
-a hosted web UI, or multi-tenant services. The architecture below leaves
-seams for all of these without a rewrite.
+or multi-tenant services. The architecture below leaves seams for all of
+these without a rewrite.
+
+**Update (post-initial-V1):** a thin REST API layer (`codeatlas.web`) now
+exists alongside the CLI, wrapping the same `Orchestrator` — see §1 and
+§13. It is an initial skeleton, not a hosted, production-ready service:
+no auth, no multi-tenancy, no upload/clone support. Running it on an
+untrusted network is an operator decision this layer does not make safe
+by itself.
 
 ## 1. Production Architecture
 
@@ -26,6 +33,8 @@ directly; nothing below the Analysis Engine talks to an LLM.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
+│ Web API Layer (codeatlas.web) — FastAPI, optional [api] extra │
+├─────────────────────────────────────────────────────────────┤
 │ CLI / Library API (codeatlas.cli / codeatlas.api)            │
 ├─────────────────────────────────────────────────────────────┤
 │ Agent Orchestrator (codeatlas.orchestrator)                   │
@@ -45,6 +54,13 @@ directly; nothing below the Analysis Engine talks to an LLM.
 ```
 
 Dependency rule: higher layers import lower layers, never the reverse.
+`codeatlas.web` currently calls `Orchestrator` directly (the same way
+`codeatlas.cli` does), not through `codeatlas.api` — that library-API
+module is still just a named, not-yet-built sibling in this diagram, so
+there is nothing for the web layer to route through yet. If `codeatlas.api`
+is built later, `codeatlas.web` should be refactored to call through it
+rather than duplicating the orchestration call, but that refactor is not
+part of this change.
 The Analysis Engine depends on the LLM abstraction's *interface*
 (`ModelProvider` protocol), never on a concrete provider (e.g. the
 `anthropic` SDK) — that keeps the model swappable per §25 of the spec.
@@ -260,6 +276,7 @@ CodeAtlas/
 │   ├── knowledge/          # ProjectKnowledge schema + store + gap detection
 │   ├── documentation/      # Markdown generator from the KB
 │   ├── orchestrator/       # pipeline wiring
+│   ├── web/                # FastAPI REST API (optional [api] extra)
 │   └── cli.py
 └── tests/
     ├── unit/
@@ -367,10 +384,55 @@ implemented and tested; deployment depth is the one M7 item still open.
 - Performance testing execution
 - Security testing *execution* (active scanning/attacks) — static
   understanding of auth/authz only
-- Hosted web UI or multi-tenant backend service
+- Hosted, production-ready web **UI**, or any multi-tenant backend
+  service. A minimal REST **API** skeleton now exists (`codeatlas.web`,
+  §13) — one endpoint wrapping the orchestrator, no auth, no upload/
+  clone support, no job queue. This is not the same thing as a hosted
+  product, and running it on an untrusted network is still an operator
+  decision this layer does not make safe by itself.
 - Real sandboxed code execution environment (no code execution happens at
   all in V1, so this isn't built yet — see §8)
 - Full tree-sitter-based parsing for every ecosystem (regex/AST-stdlib
   heuristics stand in for non-Python ecosystems in V1)
 - Fully automated incremental re-analysis as a CLI command (the caching
   substrate is built; the "watch for changes and re-run" command is not)
+
+## 13. Web API Layer (`codeatlas.web`)
+
+Added after initial V1, by explicit request, as a genuinely new
+architectural layer (not a vertical slice) — scoped deliberately narrow:
+
+- **Dependency placement:** `fastapi`/`uvicorn` are an optional
+  `[project.optional-dependencies] api` extra, not a core dependency.
+  CLI/library-only installs stay dependency-light, matching §2's
+  original "no web framework... nothing here needs it" reasoning —
+  until something explicitly opts in via `pip install codeatlas[api]`.
+- **Endpoints (initial skeleton):** `GET /health` (liveness) and
+  `POST /analyze` (wraps `Orchestrator.run()`, returns `ProjectKnowledge`
+  + the Markdown report as JSON — reusing the existing pydantic schema
+  directly as the response model, no parallel API schema).
+- **Trust boundary, stated plainly:** the CLI trusts whoever runs it to
+  only point it at paths they already have filesystem access to. A
+  network caller is not that person, so `repo_path` is never trusted as
+  given. It is resolved and confined under a server-configured
+  `CODEATLAS_API_ALLOWED_ROOT` (mirroring `RepositoryWalker`'s own path
+  confinement, applied at the network boundary instead); any path
+  escaping that root — absolute paths included — is rejected with 403.
+  If `CODEATLAS_API_ALLOWED_ROOT` is unset, every analysis request fails
+  closed with 503 rather than defaulting to "anything on disk is fair
+  game." `CODEATLAS_API_DATA_DIR` (where the knowledge base/evidence are
+  written) is likewise server-configured, never client-supplied — one
+  fewer filesystem path for a network caller to control.
+- **Execution model:** `Orchestrator.run()` is synchronous and file-I/O
+  bound; the route function is a plain (non-`async`) function, so
+  FastAPI/Starlette run it in its default worker thread pool rather than
+  blocking the event loop. No job queue, no background-task tracking —
+  consistent with §1's "no task queue in V1" and still true here.
+- **Deliberately not built in this initialization:** repo upload or
+  git-clone support (a materially bigger feature — storage, cleanup,
+  size limits — than initializing the layer); authentication/
+  authorization on the endpoints (running this server at all remains an
+  operator decision this layer does not make safe by itself);
+  multi-tenancy; a `codeatlas.api` library-API indirection (the web
+  layer calls `Orchestrator` directly today, matching how the CLI
+  already does it — see §1's note on this).
