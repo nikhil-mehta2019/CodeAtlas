@@ -295,7 +295,8 @@ def _section_known_issues(k: ProjectKnowledge) -> str:
     if not k.known_issues:
         lines.append("None recorded in this pass.")
     for issue in k.known_issues:
-        lines.append(f"- [{issue.severity}] {issue.description}")
+        source = f" (`{issue.source_file}`)" if issue.source_file else ""
+        lines.append(f"- [{issue.severity}] {issue.description}{source}")
     return "\n".join(lines)
 
 
