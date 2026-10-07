@@ -436,3 +436,139 @@ architectural layer (not a vertical slice) — scoped deliberately narrow:
   multi-tenancy; a `codeatlas.api` library-API indirection (the web
   layer calls `Orchestrator` directly today, matching how the CLI
   already does it — see §1's note on this).
+
+## 14. Authentication Architecture for `codeatlas.web` (Design Only — Not Implemented)
+
+**Disambiguation, stated up front:** this section is about authenticating
+*callers of CodeAtlas's own API* — who is allowed to hit `POST /analyze`
+on this server. It has nothing to do with `codeatlas.analysis.authentication`,
+which studies how a *target repository being analyzed* handles auth. The
+two are unrelated systems that happen to share the word "authentication";
+conflating them while implementing this would be a real mistake.
+
+This section is a design, written in response to an explicit "design
+only, do not implement" request. No code, schema, or dependency exists
+for anything below — §13's `codeatlas.web` module still has zero
+authentication today, exactly as documented there.
+
+### 14.1 Problem
+
+Right now, anyone who can reach the server can call `/analyze` for any
+repository under `CODEATLAS_API_ALLOWED_ROOT`. That env var controls
+*which repos* can be analyzed; nothing controls *who* can ask. A caller
+can read structured facts (file contents are never returned directly,
+but names/paths/dependency names/detected business rules certainly are)
+about every repo under that root, and can consume CPU/IO by triggering
+arbitrarily many analyses.
+
+### 14.2 Design goals
+
+- Reject unauthenticated calls to state-changing/resource-reading
+  endpoints (`/analyze`) before any work happens — `/health` stays open,
+  matching standard liveness-probe practice.
+- Fail closed, consistent with the `CODEATLAS_API_ALLOWED_ROOT` /
+  `CODEATLAS_API_DATA_DIR` precedent already set in §13: no auth
+  configuration present → the protected endpoints refuse to serve,
+  never silently allow.
+- Keep the mechanism swappable, mirroring `codeatlas.llm.ModelProvider`'s
+  proven shape in this codebase: a narrow interface, one V1
+  implementation behind it, no caller code tied to the concrete class.
+- Do not block a later multi-tenancy decision, without pretending to
+  solve it now. Identity (`Principal`) and data isolation (separate
+  concern, see §14.6) are kept decoupled on purpose.
+- Stay proportionate: this is a single FastAPI app with two endpoints,
+  not a consumer-facing SaaS. The design should not reach for OAuth2/IdP
+  integration machinery a project at this stage doesn't need yet — see
+  §14.4 for why a static API key is the recommended V1, not a limitation
+  snuck in by default.
+
+### 14.3 Proposed interface
+
+```
+AuthProvider (protocol, codeatlas.web.auth — not yet created)
+    def authenticate(credential: str | None) -> Principal | None
+        # None credential or invalid -> None (caller is rejected)
+
+Principal (frozen value object)
+    id: str          # opaque caller identifier, e.g. "team-a"
+    label: str | None # human-readable name for logs/audit, optional
+```
+
+A FastAPI dependency (`require_principal`) would call the configured
+`AuthProvider`, raise `401` on `None`, and otherwise inject the
+`Principal` into the route — the same "protocol + one default
+implementation + a factory function" shape `codeatlas/llm/__init__.py`
+already uses for `get_default_provider()`.
+
+### 14.4 Recommended V1 implementation: static API keys
+
+- `ApiKeyAuthProvider`: validates a bearer token (`Authorization: Bearer
+  <key>`) against a server-configured mapping of key → `Principal.id`,
+  read from `CODEATLAS_API_KEYS` (a simple `label1:key1,label2:key2`
+  env-var format, matching the project's existing preference for env-var
+  configuration over a new store — see `CODEATLAS_API_ALLOWED_ROOT`).
+- Unset `CODEATLAS_API_KEYS` → `require_principal` always returns `401`
+  for every caller, rather than defaulting to "open" — the same
+  fail-closed shape as §13's `ConfigurationError` → `503` path, except
+  `401` is the correct status for "you didn't prove who you are" versus
+  `503` for "the server itself isn't configured to do this at all."
+  (Worth a deliberate decision at implementation time whether an
+  unconfigured auth provider should read as `401` or `503`; `401` is
+  recommended because the problem is caller-facing, not server-facing.)
+- Why not OAuth2/JWT/an IdP for V1: those solve problems this project
+  doesn't have yet (no user accounts, no third-party identity
+  federation, a handful of trusted internal callers at most). Adding
+  that machinery now would be exactly the kind of "speculative
+  generality for later" `CLAUDE.md` asks this codebase to avoid. The
+  `AuthProvider` protocol exists specifically so swapping to a
+  JWT-validating implementation later is additive, not a rewrite.
+- Why not mTLS/IP-allowlisting only: those are legitimate and can be
+  layered underneath this (e.g. terminated by a reverse proxy) but give
+  no per-caller `Principal` for the audit trail in §14.6 — recommended
+  as defense in depth, not as a substitute for application-level auth.
+
+### 14.5 Transport security (explicitly out of this design's scope)
+
+API keys sent over plain HTTP are visible to anyone on the network path.
+This design assumes TLS termination happens in front of this process
+(a reverse proxy, load balancer, or platform ingress) — `codeatlas.web`
+itself should not grow its own TLS handling. This is the same posture
+§13 already states: "running it on an untrusted network is an operator
+decision this layer does not make safe by itself."
+
+### 14.6 Explicitly deferred, not decided here
+
+- **Per-caller data isolation.** `KnowledgeStore`/`EvidenceStore` are
+  partitioned by `project_id` today (CLAUDE.md: "Project isolation"),
+  not by `Principal`. A `Principal` who is authenticated can still see
+  analysis results for any `project_id` under the shared `data_dir` —
+  authentication here answers "who are you," not "what can you see."
+  True multi-tenant isolation is a separate, larger design decision
+  (likely: namespace `data_dir` per `Principal.id`) and is out of scope
+  for this write-up.
+- **Audit trail.** Recording which `Principal` requested which analysis
+  would mean adding a field somewhere in the evidence/knowledge
+  persistence path — a schema change, not an auth-layer change. Noted
+  as a natural follow-up hook, not designed here.
+- **Key rotation/revocation UX.** An env var requires a process restart
+  to rotate. Acceptable for a V1 single-operator deployment; a
+  dedicated key store (file- or DB-backed) would be the natural upgrade
+  if rotation without downtime becomes a real requirement.
+
+### 14.7 Open decisions needing sign-off before implementation
+
+These materially affect architecture, security posture, and future
+flexibility — per `CLAUDE.md`, they are named here rather than decided
+unilaterally:
+
+1. **Mechanism:** static API key (§14.4, recommended) vs. OAuth2/JWT
+   vs. delegating entirely to a reverse proxy/API gateway outside this
+   repo.
+2. **Key storage:** env var (simplest, matches existing project
+   convention, but requires a restart to rotate) vs. a dedicated local
+   key store (more operability, more surface to build/secure).
+3. **`401` vs. `503`** when no auth is configured at all (§14.4
+   recommends `401`).
+4. **Whether to design for multi-tenant data isolation now** (§14.6) or
+   treat it as fully separate future work once a real second tenant
+   exists.
