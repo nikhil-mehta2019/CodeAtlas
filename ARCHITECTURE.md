@@ -142,6 +142,16 @@ Rules enforced in code, not just convention:
 - Evidence excerpts pass through the secret-redaction filter (§8 below)
   before they are ever written to disk.
 
+These rules are checked by `codeatlas.evidence.schema.assert_status_supported`,
+called at every evidence-backfill site in `orchestrator/pipeline.py` via its
+`_link_evidence` helper — a construction-time guard, not just a convention
+analyzer authors are expected to follow. **Known, deliberate exception:**
+`TechnologyItem` entries (`TechnologyStack.items`) are not yet covered —
+several ecosystem/infra detectors don't create a matching `Evidence`
+record for every item they produce (e.g. a Python runtime-version item),
+and fixing that needs per-detector changes, not pipeline wiring. Tracked
+as open work, not silently ignored.
+
 ## 5. Discovery Workflow
 
 Discovery is static, deterministic, and runs with **zero LLM calls** —

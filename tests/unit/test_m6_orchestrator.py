@@ -49,6 +49,13 @@ def test_authentication_and_authorization_evidence_is_propagated(tmp_path):
     backfilled (see e.g. the database table / component backfills a few
     lines above this call in pipeline.py). Both fields stayed permanently
     empty even though the underlying evidence existed and was persisted.
+
+    Also covers a second bug found while fixing the first: the outer
+    AuthenticationModel.evidence/AuthorizationModel.evidence fields are
+    never actually rendered by the documentation generator -- only the
+    *nested* mechanism/model Finding's own .evidence is (via _fmt_finding
+    in generator.py). Both the outer aggregate and the nested Finding's
+    evidence must be populated.
     """
     orchestrator = Orchestrator(data_dir=tmp_path / "data")
     run = orchestrator.run(str(FIXTURES / "python_fastapi"))
@@ -58,10 +65,12 @@ def test_authentication_and_authorization_evidence_is_propagated(tmp_path):
 
     assert authn.mechanism is not None  # JWT is detected in this fixture
     assert authn.evidence, "AuthenticationModel.evidence must not be empty when a mechanism was found"
+    assert authn.mechanism.evidence, "the nested mechanism Finding's own .evidence (what generator.py renders) must not be empty"
     assert all(ref.evidence_id for ref in authn.evidence)
 
     assert authz.model is not None  # a role-gated check is detected in this fixture
     assert authz.evidence, "AuthorizationModel.evidence must not be empty when an authorization model was found"
+    assert authz.model.evidence, "the nested model Finding's own .evidence (what generator.py renders) must not be empty"
 
     # Backfilled refs must point at evidence that was actually persisted,
     # not fabricated placeholders.
@@ -69,5 +78,5 @@ def test_authentication_and_authorization_evidence_is_propagated(tmp_path):
 
     store = EvidenceStore(tmp_path / "data", run.knowledge.project_id)
     persisted_ids = {e.evidence_id for e in store.load_all()}
-    for ref in authn.evidence + authz.evidence:
+    for ref in authn.evidence + authz.evidence + authn.mechanism.evidence + authz.model.evidence:
         assert ref.evidence_id in persisted_ids

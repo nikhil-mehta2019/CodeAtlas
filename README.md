@@ -13,11 +13,14 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (48 passing tests, `pytest`):
+Implemented and tested (56 passing tests, `pytest`):
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence
-  rule enforced in code.
+  rule actively enforced at every evidence-backfill site in
+  `orchestrator/pipeline.py` (not just available as a standalone,
+  independently-unit-tested function) — except `TechnologyItem` entries,
+  an explicit, tracked gap (see `ARCHITECTURE.md` §4).
 - Discovery engine: deep support for **Python** and **Node.js/TypeScript**;
   shallow (manifest-presence-only, honestly labeled) support for **.NET,
   Java, Go, PHP**; Docker/CI/IaC infra detection; priority-path builder.
