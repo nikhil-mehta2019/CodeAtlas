@@ -301,13 +301,24 @@ CodeAtlas/
      rule), and Enum-based state membership (never asserting which
      transitions between states are valid). Node/TS validation-library
      parsing (Joi/Zod/Yup) and JS route+role business rules are an
-     explicit, tracked gap, not implemented in this slice. Still open in
-     M7: coding standards, deployment depth, dependency intelligence.
+     explicit, tracked gap, not implemented in this slice.
+   - **Coding standards: done, Python-only.** `codeatlas/analysis/coding_standards.py`
+     measures (never asserts from a handful of examples) naming-convention
+     consistency for functions and classes using Python's `ast` module,
+     test-file naming convention (reusing the priority plan's test file
+     list), FastAPI `Depends(...)` dependency-injection usage, and
+     `*Repository`-suffixed class naming. `recommended_improvements` is
+     always left empty in this pass — per the spec's explicit instruction
+     not to call something a violation just for differing from a
+     preferred style, and no project-specific baseline is configured.
+     Node/TS conventions are an explicit, tracked gap. Still open in M7:
+     deployment depth, dependency intelligence.
 8. **M8 — Real-world validation** against the project types listed in
    spec §28.
 
-M1-M6 and the database, authentication, integrations, and business-rules
-slices of M7 are implemented and tested; the rest of M7 is in progress.
+M1-M6 and the database, authentication, integrations, business-rules,
+and coding-standards slices of M7 are implemented and tested; the rest
+of M7 is in progress.
 
 ## 11. Major Technical Risks
 
