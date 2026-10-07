@@ -439,136 +439,385 @@ architectural layer (not a vertical slice) — scoped deliberately narrow:
 
 ## 14. Authentication Architecture for `codeatlas.web` (Design Only — Not Implemented)
 
-**Disambiguation, stated up front:** this section is about authenticating
-*callers of CodeAtlas's own API* — who is allowed to hit `POST /analyze`
-on this server. It has nothing to do with `codeatlas.analysis.authentication`,
-which studies how a *target repository being analyzed* handles auth. The
-two are unrelated systems that happen to share the word "authentication";
-conflating them while implementing this would be a real mistake.
+**Revision note:** this section originally recommended a static API-key
+scheme for a handful of trusted internal callers. The product direction
+has since been clarified: CodeAtlas is a browser-based product where an
+end user signs up, logs in, creates projects, and runs analyses. A
+shared API key cannot express "this is Alice's project, not Bob's," so
+that recommendation is replaced below with a first-party user-account
+system. Nothing in the old §14.3/§14.4 interface (`AuthProvider` /
+`Principal` / `ApiKeyAuthProvider`) survives this revision except the
+general shape ("a narrow interface, one concrete implementation behind
+it") — see §14.4.
 
-This section is a design, written in response to an explicit "design
-only, do not implement" request. No code, schema, or dependency exists
-for anything below — §13's `codeatlas.web` module still has zero
-authentication today, exactly as documented there.
+**Disambiguation, stated up front, unchanged from the prior revision:**
+this section is about authenticating *end users of CodeAtlas's own
+product* — who can sign up, log in, and own projects in this system. It
+has nothing to do with `codeatlas.analysis.authentication`, which
+studies how a *target repository being analyzed* handles auth. The two
+are unrelated systems that happen to share the word "authentication";
+conflating them while implementing this would be a real mistake. (It is
+a genuinely amusing coincidence that `codeatlas.analysis.authentication`
+already knows how to *detect* bcrypt/password-hashing usage in other
+people's codebases — §14.5 below chooses a hashing algorithm for
+CodeAtlas's own use, which is a product decision, not something that
+analyzer produces or consumes.)
 
-### 14.1 Problem
+This section remains a design, written in response to an explicit
+"design only, do not implement" request. No code, schema, or dependency
+exists for anything below — `codeatlas.web` still has zero
+authentication today, exactly as §13 documents.
+
+### 14.1 Problem, restated for the real product shape
 
 Right now, anyone who can reach the server can call `/analyze` for any
-repository under `CODEATLAS_API_ALLOWED_ROOT`. That env var controls
-*which repos* can be analyzed; nothing controls *who* can ask. A caller
-can read structured facts (file contents are never returned directly,
-but names/paths/dependency names/detected business rules certainly are)
-about every repo under that root, and can consume CPU/IO by triggering
-arbitrarily many analyses.
+repository under `CODEATLAS_API_ALLOWED_ROOT`, with no caller identity
+at all. The real product needs more than "reject anonymous callers": it
+needs **accounts** (so a person can come back and see their own past
+work), **ownership** (so Alice's projects aren't Bob's to read or run),
+and a browser-appropriate credential (a cookie a `<form>` POST or
+`fetch()` call carries automatically — not a bearer token a human has to
+paste into a header).
 
 ### 14.2 Design goals
 
-- Reject unauthenticated calls to state-changing/resource-reading
-  endpoints (`/analyze`) before any work happens — `/health` stays open,
-  matching standard liveness-probe practice.
-- Fail closed, consistent with the `CODEATLAS_API_ALLOWED_ROOT` /
-  `CODEATLAS_API_DATA_DIR` precedent already set in §13: no auth
-  configuration present → the protected endpoints refuse to serve,
-  never silently allow.
-- Keep the mechanism swappable, mirroring `codeatlas.llm.ModelProvider`'s
-  proven shape in this codebase: a narrow interface, one V1
-  implementation behind it, no caller code tied to the concrete class.
-- Do not block a later multi-tenancy decision, without pretending to
-  solve it now. Identity (`Principal`) and data isolation (separate
-  concern, see §14.6) are kept decoupled on purpose.
-- Stay proportionate: this is a single FastAPI app with two endpoints,
-  not a consumer-facing SaaS. The design should not reach for OAuth2/IdP
-  integration machinery a project at this stage doesn't need yet — see
-  §14.4 for why a static API key is the recommended V1, not a limitation
-  snuck in by default.
+- Real user accounts: email/password signup, login, logout, password
+  reset — the full lifecycle, not just "reject anonymous."
+- Server-side sessions, not stateless tokens (JWT or otherwise) and not
+  Starlette's built-in `SessionMiddleware` either — that middleware
+  signs session *data* into the cookie itself (stateless, just
+  tamper-evident); this design puts only an opaque session ID in the
+  cookie and keeps the actual session record server-side, so a session
+  can be revoked (logout, password reset, admin action) by deleting one
+  row, not by waiting for a token to expire. This distinction is worth
+  stating explicitly because the two are easy to conflate and only one
+  of them is "server-side sessions" in the sense asked for.
+- `User → Project → Analysis` ownership as real, enforced data
+  relationships, not just documentation — every protected endpoint
+  checks the requesting user owns the resource before touching it.
+- Fail closed, consistent with precedent already set in §13
+  (`CODEATLAS_API_ALLOWED_ROOT` / `CODEATLAS_API_DATA_DIR`): missing
+  configuration (e.g. no session-signing/storage setup) means the
+  protected surface refuses to serve, never silently falls back to
+  "open."
+- Stay proportionate to what was actually asked for: first-party
+  email/password accounts, server-side sessions, cookies, CSRF
+  protection, password reset, and ownership. No OAuth/social login, no
+  external identity provider, no billing/subscriptions, no
+  speculative multi-tenant infrastructure (organizations, teams, roles,
+  per-tenant quotas) beyond the single-owner `Project`/`Analysis`
+  relationship actually requested. SQLite, matching the project's
+  existing storage choice (§2) and keeping a second real database out of
+  scope for V1.
+- Preserve CLI functionality exactly as-is: `codeatlas.cli`,
+  `Orchestrator`, `KnowledgeStore`, and `EvidenceStore` are untouched by
+  everything below. The CLI's trust model (whoever runs it already has
+  filesystem access) doesn't need accounts, sessions, or ownership —
+  see §14.11.
 
-### 14.3 Proposed interface
+### 14.3 Data model
+
+A new SQLite database, physically separate from `knowledge.db`
+(`accounts.db`, written with stdlib `sqlite3` the same way
+`KnowledgeStore` already is — §2's "thin repository pattern," no ORM
+introduced). Separating it from `knowledge.db` means a compromise of
+analysis data doesn't directly expose password hashes, and vice versa,
+and it keeps "data CodeAtlas's own product owns about its users" cleanly
+apart from "data CodeAtlas produced by analyzing someone else's repo."
 
 ```
-AuthProvider (protocol, codeatlas.web.auth — not yet created)
-    def authenticate(credential: str | None) -> Principal | None
-        # None credential or invalid -> None (caller is rejected)
+User
+├── id (uuid)
+├── email (unique, case-insensitively normalized)
+├── password_hash (argon2id — see §14.5)
+├── created_at
+└── email_verified: bool = False   # see §14.9 -- deferred, column reserved
 
-Principal (frozen value object)
-    id: str          # opaque caller identifier, e.g. "team-a"
-    label: str | None # human-readable name for logs/audit, optional
+Session
+├── id (opaque random token -- this is the only session "state" the browser holds)
+├── user_id → User
+├── created_at
+├── expires_at
+├── last_seen_at
+└── revoked: bool = False          # set on logout / password reset, not deleted immediately (audit)
+
+PasswordResetToken
+├── id
+├── user_id → User
+├── token_hash                     # the token itself is never stored -- same reasoning as password_hash
+├── created_at
+├── expires_at                     # short-lived, e.g. 30-60 minutes
+└── used_at: datetime | None
+
+Project
+├── id (uuid)
+├── owner_user_id → User
+├── name
+└── created_at
+
+Analysis
+├── id (uuid)
+├── project_id → Project
+├── knowledge_project_id           # the EXISTING ProjectKnowledge.project_id string -- see naming note below
+├── requested_by_user_id → User
+├── status                         # "pending" | "completed" | "failed" -- see §14.8 on execution model
+└── created_at
 ```
 
-A FastAPI dependency (`require_principal`) would call the configured
-`AuthProvider`, raise `401` on `None`, and otherwise inject the
-`Principal` into the route — the same "protocol + one default
-implementation + a factory function" shape `codeatlas/llm/__init__.py`
-already uses for `get_default_provider()`.
+**Naming collision, flagged rather than silently resolved:** the
+existing `ProjectKnowledge.project_id` (§3) is a content-hash-derived
+identifier for *what was analyzed* — it has nothing to do with the
+`Project` entity above, which is a user-facing *ownership/organization*
+concept (e.g. "Alice's Backend Repo"). Having both called "project" is
+a real naming collision this design does not think is fine to ship
+as-is — §14.12 lists it as an open decision (e.g. rename the ownership
+entity to `Workspace` or rename the knowledge concept, rather than
+guessing which one changes).
 
-### 14.4 Recommended V1 implementation: static API keys
+`Analysis` is the join between the two worlds: it belongs to a `Project`
+(ownership) and points at a `knowledge_project_id` (the actual
+`ProjectKnowledge` row, still living in the existing, unchanged
+`KnowledgeStore`/`EvidenceStore`). Authorization checks happen entirely
+in `accounts.db` (does this user own this `Project`?) before ever
+touching `knowledge.db` — the existing knowledge/evidence storage layer
+is reused as-is, not duplicated or modified, per `CLAUDE.md`'s "reuse,
+don't duplicate."
 
-- `ApiKeyAuthProvider`: validates a bearer token (`Authorization: Bearer
-  <key>`) against a server-configured mapping of key → `Principal.id`,
-  read from `CODEATLAS_API_KEYS` (a simple `label1:key1,label2:key2`
-  env-var format, matching the project's existing preference for env-var
-  configuration over a new store — see `CODEATLAS_API_ALLOWED_ROOT`).
-- Unset `CODEATLAS_API_KEYS` → `require_principal` always returns `401`
-  for every caller, rather than defaulting to "open" — the same
-  fail-closed shape as §13's `ConfigurationError` → `503` path, except
-  `401` is the correct status for "you didn't prove who you are" versus
-  `503` for "the server itself isn't configured to do this at all."
-  (Worth a deliberate decision at implementation time whether an
-  unconfigured auth provider should read as `401` or `503`; `401` is
-  recommended because the problem is caller-facing, not server-facing.)
-- Why not OAuth2/JWT/an IdP for V1: those solve problems this project
-  doesn't have yet (no user accounts, no third-party identity
-  federation, a handful of trusted internal callers at most). Adding
-  that machinery now would be exactly the kind of "speculative
-  generality for later" `CLAUDE.md` asks this codebase to avoid. The
-  `AuthProvider` protocol exists specifically so swapping to a
-  JWT-validating implementation later is additive, not a rewrite.
-- Why not mTLS/IP-allowlisting only: those are legitimate and can be
-  layered underneath this (e.g. terminated by a reverse proxy) but give
-  no per-caller `Principal` for the audit trail in §14.6 — recommended
-  as defense in depth, not as a substitute for application-level auth.
+### 14.4 Interface shape (kept from the prior revision)
 
-### 14.5 Transport security (explicitly out of this design's scope)
+The prior design's instinct — a narrow interface with one concrete
+implementation behind it, mirroring `codeatlas.llm.ModelProvider` — still
+applies, just scoped to what's actually swappable here: how a request is
+mapped to a `User`.
 
-API keys sent over plain HTTP are visible to anyone on the network path.
-This design assumes TLS termination happens in front of this process
-(a reverse proxy, load balancer, or platform ingress) — `codeatlas.web`
-itself should not grow its own TLS handling. This is the same posture
-§13 already states: "running it on an untrusted network is an operator
-decision this layer does not make safe by itself."
+```
+SessionStore (protocol, codeatlas.web.accounts — not yet created)
+    def create(user_id) -> Session
+    def get(session_id) -> Session | None   # None if missing, expired, or revoked
+    def revoke(session_id) -> None
+    def revoke_all_for_user(user_id) -> None   # used on password reset
 
-### 14.6 Explicitly deferred, not decided here
+PasswordHasher (protocol)
+    def hash(password: str) -> str
+    def verify(password: str, password_hash: str) -> bool
+```
 
-- **Per-caller data isolation.** `KnowledgeStore`/`EvidenceStore` are
-  partitioned by `project_id` today (CLAUDE.md: "Project isolation"),
-  not by `Principal`. A `Principal` who is authenticated can still see
-  analysis results for any `project_id` under the shared `data_dir` —
-  authentication here answers "who are you," not "what can you see."
-  True multi-tenant isolation is a separate, larger design decision
-  (likely: namespace `data_dir` per `Principal.id`) and is out of scope
-  for this write-up.
-- **Audit trail.** Recording which `Principal` requested which analysis
-  would mean adding a field somewhere in the evidence/knowledge
-  persistence path — a schema change, not an auth-layer change. Noted
-  as a natural follow-up hook, not designed here.
-- **Key rotation/revocation UX.** An env var requires a process restart
-  to rotate. Acceptable for a V1 single-operator deployment; a
-  dedicated key store (file- or DB-backed) would be the natural upgrade
-  if rotation without downtime becomes a real requirement.
+A FastAPI dependency (`require_user`) reads the session-id cookie, calls
+`SessionStore.get`, loads the associated `User` if the session is valid,
+and raises `401` otherwise — this is what `/projects`, `/analyze`, etc.
+depend on. `SessionStore`/`PasswordHasher` being protocols (not a
+concrete SQLite class hardcoded into every route) is what keeps this
+swappable later without a rewrite, the same reasoning §14 originally
+gave for `AuthProvider`.
 
-### 14.7 Open decisions needing sign-off before implementation
+### 14.5 Signup, login, logout
 
-These materially affect architecture, security posture, and future
-flexibility — per `CLAUDE.md`, they are named here rather than decided
-unilaterally:
+- **`POST /auth/signup`** `{email, password}` → validate email format
+  and password (minimum length is the main requirement; full policy is
+  a tunable, not fixed here) → reject if the email is already
+  registered (generic error, doesn't leak *why* beyond "already in
+  use" since that's unavoidable for signup specifically) → hash the
+  password (§14.6) → create `User` → create a `Session` → set the
+  session cookie (§14.7) → respond with the user's own public profile
+  (id, email, created_at) — **a password hash is never present in any
+  response body, ever.**
+- **`POST /auth/login`** `{email, password}` → look up by normalized
+  email → verify password against the stored hash → on success, create
+  a `Session` and set the cookie; on failure, a single generic "invalid
+  email or password" for both "no such user" and "wrong password" (this
+  is the standard mitigation for account enumeration via the login
+  endpoint specifically — note the signup endpoint above cannot offer
+  the same protection, since it must tell the user their email is
+  already registered to be usable at all; that's a real, known tradeoff,
+  not an oversight).
+- **`POST /auth/logout`** → revoke the current session server-side
+  (`SessionStore.revoke`) and clear the cookie. Revoking server-side,
+  not just clearing the cookie client-side, is what makes this a real
+  logout rather than a cosmetic one (a copied cookie value would
+  otherwise keep working).
+- **Brute-force protection** (login attempt rate limiting / lockout) is
+  a real, known gap this design does not solve — flagged in §14.12, not
+  silently assumed away.
 
-1. **Mechanism:** static API key (§14.4, recommended) vs. OAuth2/JWT
-   vs. delegating entirely to a reverse proxy/API gateway outside this
-   repo.
-2. **Key storage:** env var (simplest, matches existing project
-   convention, but requires a restart to rotate) vs. a dedicated local
-   key store (more operability, more surface to build/secure).
-3. **`401` vs. `503`** when no auth is configured at all (§14.4
-   recommends `401`).
-4. **Whether to design for multi-tenant data isolation now** (§14.6) or
-   treat it as fully separate future work once a real second tenant
-   exists.
+### 14.6 Password hashing
+
+**Argon2id**, via the `argon2-cffi` package (new dependency, `api`
+extra only — the CLI never needs it) — currently the first choice in
+OWASP's Password Storage Cheat Sheet, memory-hard (meaningfully more
+GPU/ASIC-crack-resistant than bcrypt), and its `verify` function is
+timing-safe by construction, so no separate constant-time-compare logic
+needs to be written. bcrypt (via the `bcrypt` package) is an acceptable
+fallback if `argon2-cffi`'s native-build requirement is ever a problem
+in a target deployment environment — flagged as a real alternative, not
+dismissed, but Argon2id is the recommendation pending the sign-off in
+§14.12.
+
+### 14.7 Sessions and cookies
+
+- Session ID: `secrets.token_urlsafe(32)` (stdlib, no new dependency) —
+  this is the only value stored in the cookie. The actual session
+  record (user, timestamps, revoked flag) lives server-side in
+  `accounts.db`, per §14.2's explicit "not Starlette's `SessionMiddleware`"
+  note.
+- Cookie attributes:
+  - `HttpOnly` — JavaScript cannot read it, which is what makes stealing
+    the session via XSS meaningfully harder.
+  - `Secure` — sent only over HTTPS. In local development over plain
+    HTTP this would silently stop the cookie from being set at all; the
+    recommendation is an env-var-gated dev-mode override (matching the
+    project's existing env-var-configuration convention), not loosening
+    the default.
+  - `SameSite=Lax` — blocks the cookie from being sent on cross-site
+    `POST` requests (the primary CSRF vector) while still working for
+    normal top-level navigation (e.g. following a link from an email).
+    `Strict` is stronger but breaks that case; `Lax` is the standard
+    pragmatic default and pairs with §14.8's explicit CSRF token as
+    defense in depth, not as the sole defense.
+  - `Path=/`, and an expiry — recommend a sliding window (e.g. 14 days,
+    refreshed on activity via `last_seen_at`) over a hard fixed expiry,
+    but this is a tunable, not fixed here.
+
+### 14.8 CSRF protection
+
+Cookies are sent automatically by the browser on same-site requests,
+which is exactly what makes a plain cookie-authenticated endpoint
+vulnerable to CSRF (a third-party site can trigger a request that
+carries the victim's cookie without their intent). `SameSite=Lax`
+(§14.7) is the primary defense; on top of it, state-changing endpoints
+(`POST`/`PUT`/`DELETE` — signup/login are the exception, since there's
+no session yet to protect at that point) require the classic
+**double-submit cookie** pattern:
+
+1. On login/signup, in addition to the `HttpOnly` session cookie, set a
+   second, *non*-`HttpOnly` cookie carrying a random CSRF token.
+2. The frontend JS reads that cookie and sends its value back on every
+   state-changing request as a custom header (e.g. `X-CSRF-Token`).
+3. The server rejects the request unless the header value matches the
+   CSRF cookie value.
+
+A third-party site can make the browser attach the session cookie
+automatically, but it cannot read the CSRF cookie's value (same-origin
+policy) to put it in the header — so a forged cross-site request fails
+this check even if `SameSite` were somehow bypassed. No new dependency
+needed; this is stdlib `secrets` plus a comparison, matching the
+project's general preference for minimal dependencies.
+
+### 14.9 API authentication and authorization
+
+- Every protected route depends on `require_user` (§14.4): no valid
+  session cookie → `401`.
+- Authorization is ownership-based, not role-based (no roles/RBAC exist
+  in this design — there is exactly one kind of relationship: a `User`
+  owns a `Project`): a route operating on a `Project` or `Analysis`
+  loads it and checks `project.owner_user_id == current_user.id` (or
+  the equivalent through `Analysis.project_id`) before doing anything
+  else; mismatch → `404`, not `403` — returning `404` for "exists but
+  not yours" rather than `403` avoids confirming to an authenticated-
+  but-unauthorized caller that a given project ID exists at all, which
+  is standard practice for resource-level authorization.
+- The existing `/analyze` endpoint (§13) as it stands today — a single
+  server-filesystem `repo_path` confined to `CODEATLAS_API_ALLOWED_ROOT`
+  — does not fit a signup-based product where arbitrary end users don't
+  have paths on the server's filesystem to point at. This design does
+  **not** solve that: it is the same "repo upload / git-clone support"
+  gap §13 already named as deliberately deferred ("a materially bigger
+  feature... than initializing the layer"), now simply more visible
+  because accounts make self-serve project creation a real expectation.
+  Until repo ingestion is designed, a real end user's only path to an
+  `Analysis` is still a repository already present under
+  `CODEATLAS_API_ALLOWED_ROOT` — meaning V1 of the authenticated product
+  is realistically usable for an operator-curated set of repositories
+  (e.g. an internal company deployment), not yet a true "paste your
+  GitHub URL" self-serve flow. Naming this gap honestly here, rather
+  than letting "add accounts" quietly imply "and now arbitrary repos
+  work too," is the point of calling it out.
+- Execution model is unchanged from §13: `Orchestrator.run()` stays
+  synchronous, called from a plain (non-`async`) route in FastAPI's
+  default thread pool. `Analysis.status` exists in the data model
+  (§14.3) to let a future async/job-queue execution model be introduced
+  without a schema rewrite, but nothing here builds that queue — this
+  is the same "don't block a future decision, don't build it either"
+  posture as the original §14.3 Principal/data-isolation split.
+
+### 14.10 Password reset architecture
+
+1. **`POST /auth/password-reset/request`** `{email}` → always return
+   the same generic response ("if that email is registered, a reset
+   link was sent"), regardless of whether the email exists — this is
+   the standard mitigation for user enumeration via the reset flow. If
+   the user does exist: generate a random token (`secrets.token_urlsafe`),
+   store only its hash (`PasswordResetToken.token_hash`, §14.3 — same
+   "never store the raw secret" reasoning as session IDs and passwords)
+   with a short expiry (30-60 minutes), and deliver the raw token to the
+   user via a reset link.
+2. **Actually delivering that link requires sending an email** —
+   CodeAtlas has no email-sending integration today. This design
+   specifies the *token* architecture fully; which email provider (or
+   whether to just log the link in a non-production/dev mode) is a
+   genuine open integration decision, not decided here — see §14.12.
+3. **`POST /auth/password-reset/confirm`** `{token, new_password}` →
+   look up by the *hash* of the submitted token, reject if not found,
+   expired, or already used → hash and set the new password → mark the
+   token used → **revoke every existing session for that user**
+   (`SessionStore.revoke_all_for_user`) — a password reset should force
+   re-login everywhere, including on a device an attacker may have
+   stolen a session from, which is exactly why `revoke_all_for_user`
+   exists in §14.4's interface and not just single-session revoke.
+
+### 14.11 CLI functionality is unaffected
+
+`codeatlas.cli`, `Orchestrator`, `KnowledgeStore`, and `EvidenceStore`
+are not touched by anything in this section. The CLI's trust model —
+whoever runs it already has filesystem access to the repo they're
+pointing it at — has no use for accounts, sessions, or ownership, and
+nothing here changes how `codeatlas analyze <path>` works. `accounts.db`
+is created and read only by `codeatlas.web`.
+
+### 14.12 Explicitly out of scope / deferred (named, not silently skipped)
+
+- **OAuth / social login** — not designed here, per explicit instruction.
+- **External identity provider** — not designed here, per explicit
+  instruction. If ever added, it should be additive behind the same
+  `SessionStore`/`require_user` seam (§14.4), not a parallel auth path.
+- **Billing / subscriptions** — not designed here, per explicit
+  instruction; no plan/quota concept exists anywhere above.
+- **Speculative multi-tenant infrastructure** — no organizations, teams,
+  roles, or per-tenant resource quotas. The only ownership relationship
+  is the single-owner `User → Project` one actually requested.
+- **Email delivery integration** — the password-reset *token* lifecycle
+  is fully designed (§14.10); which provider sends the email, or how
+  dev/local environments see the link at all, is not.
+- **Email verification** — the `User.email_verified` column is reserved
+  in §14.3's schema sketch but no verification flow is designed; accounts
+  are usable immediately after signup in this design.
+- **Brute-force / credential-stuffing protection** (login rate limiting,
+  lockout, CAPTCHA) — a real, known gap, not assumed away; flagged as
+  follow-up hardening.
+- **Repo ingestion for self-serve project creation** (upload or
+  git-clone) — restates §13's existing deferral; §14.9 explains why
+  accounts alone don't resolve it.
+- **Multi-user collaboration on a single `Project`** (sharing, roles
+  within a project) — out of scope; the model is strictly single-owner.
+
+### 14.13 Open decisions needing sign-off before implementation
+
+Per `CLAUDE.md`, named here rather than decided unilaterally:
+
+1. **The `Project`/`project_id` naming collision** (§14.3) — rename the
+   new ownership entity (e.g. `Workspace`), rename the existing
+   knowledge concept, or something else.
+2. **Password hashing algorithm:** Argon2id via `argon2-cffi`
+   (recommended, §14.6) vs. bcrypt, trading a native-build dependency
+   for broader out-of-the-box availability in some environments.
+3. **Session expiry policy:** sliding window vs. fixed, and the actual
+   duration.
+4. **`404` vs. `403`** for "authenticated but not the owner" (§14.9
+   recommends `404`, to avoid confirming a resource's existence to an
+   unauthorized caller — some products prefer the more explicit `403`
+   at the cost of that leak).
+5. **Email delivery provider** for password reset (§14.10/§14.12), or
+   an explicit decision to defer it and only support dev-mode link
+   logging until a provider is chosen.
+6. **Password policy specifics** (minimum length, common-password
+   blocklist, etc.) beyond "has a minimum length," which this design
+   treats as a tunable rather than fixing a number.
