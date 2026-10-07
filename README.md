@@ -13,7 +13,7 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (41 passing tests, `pytest`):
+Implemented and tested (48 passing tests, `pytest`):
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence
@@ -39,17 +39,22 @@ Implemented and tested (41 passing tests, `pytest`):
   key *names* matched to a provider — values are never captured);
   business rules analyzer (Python-only: Pydantic `Field` validation
   constraints, role-gated business actions, Enum-based state membership
-  — never asserting which state transitions are valid).
+  — never asserting which state transitions are valid); coding standards
+  analyzer (Python-only: measured naming-convention consistency via
+  `ast`, test-file naming convention, FastAPI `Depends(...)`
+  dependency-injection usage, `*Repository`-suffixed class naming —
+  `recommended_improvements` is always left empty, per the spec's own
+  instruction not to call something a violation just for differing from
+  a preferred style).
 - Gap/Unknown detector covering every major question the spec asks (§2).
 - Documentation generator: renders the full 19-section report from
   structured knowledge only — no second LLM pass hallucinating prose.
 - CLI (`codeatlas analyze <path>`) and SQLite/file-based persistence.
 
 **Not yet implemented** (tracked, not hidden — see `ARCHITECTURE.md` §10,
-§12): coding standards and dependency-intelligence analyzers; Node/TS
-business rules (Joi/Zod/Yup validation, JS route+role rules); Django
-ORM/Mongoose table-schema parsing (engine/ORM identity
-for them is detected, columns are not);
+§12): dependency-intelligence analyzer; Node/TS business rules and
+coding-standards conventions; Django ORM/Mongoose table-schema parsing
+(engine/ORM identity for them is detected, columns are not);
 API-key authentication detection; LLM-assisted analysis (the plumbing
 exists, no analyzer calls it yet); OpenAPI spec parsing; incremental
 re-analysis as a CLI command;

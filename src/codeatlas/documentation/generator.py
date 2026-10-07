@@ -239,6 +239,11 @@ def _section_coding_standards(k: ProjectKnowledge) -> str:
         lines.append("❔ Not analyzed in this pass.")
     for o in k.coding_standards.observed:
         lines.append(f"- {o}")
+    lines.append("### Design Patterns Observed")
+    if not k.coding_standards.design_patterns_observed:
+        lines.append("❔ Not analyzed in this pass.")
+    for p in k.coding_standards.design_patterns_observed:
+        lines.append(f"- {p}")
     lines.append("### Recommended Improvements (separate from observed standards)")
     for r in k.coding_standards.recommended_improvements:
         lines.append(f"- {r}")
