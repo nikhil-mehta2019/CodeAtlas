@@ -13,7 +13,7 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (56 passing tests, `pytest`):
+Implemented and tested (61 passing tests, `pytest`):
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence
@@ -48,16 +48,22 @@ Implemented and tested (56 passing tests, `pytest`):
   dependency-injection usage, `*Repository`-suffixed class naming —
   `recommended_improvements` is always left empty, per the spec's own
   instruction not to call something a violation just for differing from
-  a preferred style).
+  a preferred style); dependency intelligence analyzer (detects the same
+  package pinned to different *exact* versions across multiple
+  declarations, reported as a `KnownIssue` — version ranges are never
+  compared for compatibility, and "potentially outdated" is not detected
+  since that needs live package-registry network access).
 - Gap/Unknown detector covering every major question the spec asks (§2).
 - Documentation generator: renders the full 19-section report from
   structured knowledge only — no second LLM pass hallucinating prose.
 - CLI (`codeatlas analyze <path>`) and SQLite/file-based persistence.
 
 **Not yet implemented** (tracked, not hidden — see `ARCHITECTURE.md` §10,
-§12): dependency-intelligence analyzer; Node/TS business rules and
-coding-standards conventions; Django ORM/Mongoose table-schema parsing
-(engine/ORM identity for them is detected, columns are not);
+§12): Node/TS business rules and coding-standards conventions; outdated-
+package detection, internal/workspace dependency classification, and
+version-range compatibility checking (the dependency analyzer only
+compares exact-pin-vs-exact-pin); Django ORM/Mongoose table-schema
+parsing (engine/ORM identity for them is detected, columns are not);
 API-key authentication detection; LLM-assisted analysis (the plumbing
 exists, no analyzer calls it yet); OpenAPI spec parsing; incremental
 re-analysis as a CLI command;

@@ -39,6 +39,7 @@ from codeatlas.analysis.authentication import analyze_authentication
 from codeatlas.analysis.business_rules import analyze_business_rules
 from codeatlas.analysis.coding_standards import analyze_coding_standards
 from codeatlas.analysis.database import analyze_database
+from codeatlas.analysis.dependencies import analyze_dependencies
 from codeatlas.analysis.integrations import analyze_integrations, provider_token
 from codeatlas.discovery.engine import DiscoveryEngine
 from codeatlas.documentation.generator import generate_markdown
@@ -148,6 +149,9 @@ class Orchestrator:
         coding_standards, standards_evidence = analyze_coding_standards(ctx, walker)
         all_evidence += standards_evidence
 
+        known_issues, dependency_evidence = analyze_dependencies(ctx)
+        all_evidence += dependency_evidence
+
         deployment = self._build_deployment(ctx)
         if deployment.containerized is not None:
             _link_evidence(
@@ -183,6 +187,7 @@ class Orchestrator:
             business_rules=business_rules,
             coding_standards=coding_standards,
             dependencies=ctx.result.dependencies,
+            known_issues=known_issues,
             deployment=deployment,
             existing_tests=existing_tests,
             evidence_index=[evidence_to_ref(e) for e in all_evidence],

@@ -8,6 +8,7 @@ dependencies = [
     "pydantic>=2.6",
     "sqlalchemy>=2.0",
     "stripe>=7.0",
+    "redis==4.0.0",
 ]
 
 [tool.poetry]

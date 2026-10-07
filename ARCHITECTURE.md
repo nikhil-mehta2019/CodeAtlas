@@ -321,14 +321,24 @@ CodeAtlas/
      always left empty in this pass — per the spec's explicit instruction
      not to call something a violation just for differing from a
      preferred style, and no project-specific baseline is configured.
-     Node/TS conventions are an explicit, tracked gap. Still open in M7:
-     deployment depth, dependency intelligence.
+     Node/TS conventions are an explicit, tracked gap.
+   - **Dependency intelligence: done, narrow scope.** `codeatlas/analysis/dependencies.py`
+     detects exactly one thing — the same package pinned to different
+     *exact* versions across multiple declarations (e.g.
+     `requirements.txt` vs `pyproject.toml`), reported as a `KnownIssue`.
+     Version ranges are never compared for compatibility (no semver
+     range-intersection logic is implemented), so a range-vs-range or
+     range-vs-pin mismatch is never flagged — explicit, tracked gaps, as
+     are "potentially outdated packages" (would need live package-
+     registry network access, out of scope for this architecture) and
+     internal/workspace dependency classification (no schema field for
+     it yet). Still open in M7: deployment depth.
 8. **M8 — Real-world validation** against the project types listed in
    spec §28.
 
 M1-M6 and the database, authentication, integrations, business-rules,
-and coding-standards slices of M7 are implemented and tested; the rest
-of M7 is in progress.
+coding-standards, and dependency-intelligence slices of M7 are
+implemented and tested; deployment depth is the one M7 item still open.
 
 ## 11. Major Technical Risks
 
