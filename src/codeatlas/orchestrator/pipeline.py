@@ -72,6 +72,12 @@ class Orchestrator:
 
         authentication, authorization, auth_evidence = analyze_authentication(ctx, walker)
         all_evidence += auth_evidence
+        authentication.evidence = [
+            evidence_to_ref(e) for e in auth_evidence if e.finding_id.startswith("authentication:")
+        ]
+        authorization.evidence = [
+            evidence_to_ref(e) for e in auth_evidence if e.finding_id.startswith("authorization:")
+        ]
 
         external_integrations, integration_evidence = analyze_integrations(ctx, walker)
         all_evidence += integration_evidence
