@@ -13,7 +13,7 @@ Documentation → Evidence → Gap Detection.** Test execution, autonomous
 fixing, and browser automation are explicitly out of scope for this
 version — see `ARCHITECTURE.md` §12.
 
-Implemented and tested (69 passing tests, `pytest`):
+Implemented and covered by the `pytest` suite:
 - Repository layer: path-confined walker, gitignore-aware exclusion,
   secret detection/redaction.
 - Evidence + Knowledge schemas with the CONFIRMED-requires-static-evidence

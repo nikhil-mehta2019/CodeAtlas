@@ -91,3 +91,18 @@ def test_webhook_never_attributed_without_provider_name_in_route(tmp_path):
 
     stripe = next(i for i in integrations if i.provider == "Stripe")
     assert stripe.webhook is False  # route says "webhook" but never names "stripe" -> not attributed
+
+
+def test_distinct_aws_providers_receive_distinct_evidence_ids(tmp_path):
+    repo = tmp_path / "aws_repo"
+    repo.mkdir()
+    (repo / "package.json").write_text(
+        '{"name":"demo","dependencies":{"aws-sdk":"1.0.0","@aws-sdk/client-s3":"1.0.0"}}',
+        encoding="utf-8",
+    )
+
+    ctx = DiscoveryEngine().discover(str(repo))
+    integrations, evidence = analyze_integrations(ctx, RepositoryWalker(repo))
+
+    assert {integration.provider for integration in integrations} == {"AWS", "AWS S3"}
+    assert {item.finding_id for item in evidence} == {"integration:aws", "integration:awss3"}

@@ -6,9 +6,9 @@ The rules enforced here (not just documented) are:
   * CONFIRMED status requires at least one Evidence record produced by a
     deterministic/static source (``discovered_by == "static"``). An LLM can
     never single-handedly promote a finding to CONFIRMED.
-  * Evidence excerpts are expected to already be secret-redacted by the
-    caller (see ``codeatlas.repository.secrets``) before construction —
-    this module does not re-scan, it trusts the pipeline contract.
+  * Evidence excerpts are redacted at model construction (see
+    ``codeatlas.repository.secrets``), so individual analyzers cannot
+    accidentally persist raw source values.
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ import uuid
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator
+
+from codeatlas.repository.secrets import redact
 
 
 class VerificationStatus(str, enum.Enum):
@@ -59,6 +61,11 @@ class Evidence(BaseModel):
     verification_status: VerificationStatus
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     discovered_by: str  # "static" or "llm:<model-id>"
+
+    @field_validator("excerpt")
+    @classmethod
+    def _redact_excerpt(cls, value: str) -> str:
+        return redact(value).text
 
     @field_validator("confidence")
     @classmethod

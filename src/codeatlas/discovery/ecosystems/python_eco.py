@@ -29,6 +29,7 @@ _TEST_MARKERS = {
 }
 
 _REQ_LINE = re.compile(r"^([A-Za-z0-9_.\-]+)\s*([><=!~]+[0-9A-Za-z.\-,]*)?")
+_MAX_MANIFESTS_PARSED = 5
 
 
 class PythonEcosystemDetector:
@@ -42,7 +43,11 @@ class PythonEcosystemDetector:
 
     def detect(self, tree: RepoTree, walker: RepositoryWalker) -> DiscoveryResult:
         result = DiscoveryResult()
-        files_by_name = {f.relative_path.rsplit("/", 1)[-1]: f for f in tree.files if not f.excluded}
+        files_by_name = {
+            f.relative_path.rsplit("/", 1)[-1]: f
+            for f in tree.files
+            if not f.excluded
+        }
 
         result.technology_items.append(
             TechnologyItem(category="language", name="Python")
@@ -59,10 +64,10 @@ class PythonEcosystemDetector:
             )
         )
 
-        if "pyproject.toml" in files_by_name:
-            self._parse_pyproject(files_by_name["pyproject.toml"], walker, result)
-        if "requirements.txt" in files_by_name:
-            self._parse_requirements(files_by_name["requirements.txt"], walker, result)
+        for file in self._manifest_files(tree, "pyproject.toml"):
+            self._parse_pyproject(file, walker, result)
+        for file in self._manifest_files(tree, "requirements.txt"):
+            self._parse_requirements(file, walker, result)
         if "manage.py" in files_by_name:
             result.technology_items.append(TechnologyItem(category="framework", name="Django"))
             result.evidence.append(
@@ -81,6 +86,19 @@ class PythonEcosystemDetector:
                 result.test_frameworks.append("pytest (assumed; tests/ directory present)")
 
         return result
+
+    @staticmethod
+    def _manifest_files(tree: RepoTree, filename: str):
+        """Return a bounded, root-first manifest list for Python monorepos."""
+        matches = [
+            file
+            for file in tree.files
+            if not file.excluded and file.relative_path.rsplit("/", 1)[-1] == filename
+        ]
+        return sorted(
+            matches,
+            key=lambda file: (file.relative_path.count("/"), file.relative_path),
+        )[:_MAX_MANIFESTS_PARSED]
 
     def _parse_pyproject(self, file, walker: RepositoryWalker, result: DiscoveryResult) -> None:
         try:

@@ -184,6 +184,7 @@ class Orchestrator:
             authentication=authentication,
             authorization=authorization,
             external_integrations=external_integrations,
+            configuration=ctx.result.configuration_items,
             business_rules=business_rules,
             coding_standards=coding_standards,
             dependencies=ctx.result.dependencies,

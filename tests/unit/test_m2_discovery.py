@@ -58,3 +58,22 @@ def test_discovery_on_node_express_fixture():
     ordered = ctx.priority_plan.ordered()
     assert "src/index.js" in ordered
     assert any("routes" in p for p in ordered)
+
+
+def test_discovery_parses_root_and_nested_python_manifests(tmp_path):
+    repo = tmp_path / "python_monorepo"
+    (repo / "service").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "root"\ndependencies = ["fastapi==0.110.0"]\n',
+        encoding="utf-8",
+    )
+    (repo / "service" / "pyproject.toml").write_text(
+        '[project]\nname = "service"\ndependencies = ["flask==3.0.0"]\n',
+        encoding="utf-8",
+    )
+
+    ctx = DiscoveryEngine().discover(str(repo))
+    dependencies_by_source = {(dep.name, dep.source_file) for dep in ctx.result.dependencies}
+
+    assert ("fastapi", "pyproject.toml") in dependencies_by_source
+    assert ("flask", "service/pyproject.toml") in dependencies_by_source

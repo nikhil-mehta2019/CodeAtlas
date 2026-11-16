@@ -80,3 +80,40 @@ def test_authentication_and_authorization_evidence_is_propagated(tmp_path):
     persisted_ids = {e.evidence_id for e in store.load_all()}
     for ref in authn.evidence + authz.evidence + authn.mechanism.evidence + authz.model.evidence:
         assert ref.evidence_id in persisted_ids
+
+
+def test_environment_configuration_keys_are_reported_without_values(tmp_path):
+    """Only configuration names—not potentially sensitive assigned values—reach outputs."""
+    repo = tmp_path / "configured_repo"
+    repo.mkdir()
+    (repo / "main.py").write_text("print('hello')\n", encoding="utf-8")
+    (repo / ".env.example").write_text(
+        "CODEATLAS_SAMPLE_TOKEN=non-production-sensitive-value\n"
+        "export DATABASE_URL=postgresql://user:password@example.test/app\n"
+        "DB=example\n"
+        "local_flag=true\n",
+        encoding="utf-8",
+    )
+
+    data_dir = tmp_path / "data"
+    run = Orchestrator(data_dir=data_dir).run(str(repo))
+
+    assert {(item.key, item.source_file) for item in run.knowledge.configuration} == {
+        ("CODEATLAS_SAMPLE_TOKEN", ".env.example"),
+        ("DATABASE_URL", ".env.example"),
+        ("DB", ".env.example"),
+        ("local_flag", ".env.example"),
+    }
+    assert "non-production-sensitive-value" not in run.markdown_report
+    assert "user:password@example.test" not in run.markdown_report
+
+    from codeatlas.knowledge.store import KnowledgeStore
+
+    with KnowledgeStore(data_dir) as store:
+        persisted_configuration = store.load_section(run.knowledge.project_id, "configuration")
+    assert persisted_configuration == [
+        {"key": "CODEATLAS_SAMPLE_TOKEN", "required": None, "source_file": ".env.example", "description": None},
+        {"key": "DATABASE_URL", "required": None, "source_file": ".env.example", "description": None},
+        {"key": "DB", "required": None, "source_file": ".env.example", "description": None},
+        {"key": "local_flag", "required": None, "source_file": ".env.example", "description": None},
+    ]

@@ -91,7 +91,7 @@ _INTEGRATION_DEPENDENCIES: dict[str, tuple[str, str, str | None, bool]] = {
 _ROUTE_LINE_PATTERN = re.compile(
     r"@(?:app|router)\.(?:get|post|put|patch|delete)\(|(?:app|router)\.(?:get|post|put|patch|delete)\("
 )
-_ENV_KEY_PATTERN = re.compile(r"^\s*([A-Z][A-Z0-9_]{2,})\s*[=:]")
+_ENV_KEY_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*[=:]")
 
 
 def analyze_integrations(ctx: DiscoveryContext, walker) -> tuple[list[ExternalIntegration], list[Evidence]]:
@@ -139,8 +139,7 @@ def analyze_integrations(ctx: DiscoveryContext, walker) -> tuple[list[ExternalIn
 
 
 def provider_token(provider: str) -> str:
-    first_word = provider.split()[0]
-    return re.sub(r"[^A-Za-z0-9]+", "", first_word).lower()
+    return re.sub(r"[^A-Za-z0-9]+", "", provider).lower()
 
 
 def _candidate_files(ctx: DiscoveryContext, paths: list[str]):

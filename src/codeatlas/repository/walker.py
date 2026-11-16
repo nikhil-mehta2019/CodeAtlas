@@ -86,6 +86,30 @@ class RepositoryWalker:
     def walk(self) -> RepoTree:
         tree = RepoTree(root=self.root)
         for path in sorted(self.root.rglob("*")):
+            # ``Path.stat`` and opening a path follow symlinks. Resolve a link
+            # before either operation so a repository cannot make discovery
+            # inspect a file outside the configured root.
+            if path.is_symlink():
+                rel = path.relative_to(self.root)
+                rel_posix = rel.as_posix()
+                try:
+                    resolved = path.resolve(strict=True)
+                    resolved.relative_to(self.root)
+                except (OSError, ValueError):
+                    tree.files.append(
+                        RepoFile(
+                            relative_path=rel_posix,
+                            absolute_path=path,
+                            size_bytes=0,
+                            is_binary=False,
+                            is_lockfile=path.name in LOCKFILE_NAMES,
+                            excluded=True,
+                            exclusion_reason="symlink_outside_root",
+                        )
+                    )
+                    continue
+                if resolved.is_dir():
+                    continue
             if path.is_dir():
                 continue
             rel = path.relative_to(self.root)
@@ -161,11 +185,19 @@ class RepositoryWalker:
         return h.hexdigest()
 
     def repository_fingerprint(self, tree: RepoTree | None = None) -> str:
-        """Content-hash of the whole tree's (path, size) listing — used to
-        derive a stable project_id and as the basis for the incremental-
-        analysis cache (ARCHITECTURE.md §7)."""
+        """Fingerprint the repository without reading excluded or binary content.
+
+        Readable files contribute a content digest so same-size edits change the
+        identity. Excluded and binary files contribute path/size metadata only,
+        preserving the repository layer's no-content-read boundary for them.
+        """
         h = hashlib.sha256()
         tree = tree if tree is not None else self.walk()
         for f in sorted(tree.files, key=lambda f: f.relative_path):
-            h.update(f"{f.relative_path}:{f.size_bytes}\n".encode())
+            content_marker = (
+                f"metadata:{f.size_bytes}"
+                if f.excluded or f.is_binary
+                else self.content_hash(f)
+            )
+            h.update(f"{f.relative_path}:{f.size_bytes}:{content_marker}\n".encode())
         return h.hexdigest()[:16]

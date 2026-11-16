@@ -54,6 +54,24 @@ def test_secret_redaction():
     assert result.had_match
 
 
+def test_evidence_schema_redacts_excerpt_before_persistence(tmp_path):
+    secret = "AKIA1234567890ABCDEF"
+    evidence = Evidence(
+        finding_id="f1",
+        source_file="app/models.py",
+        excerpt=f'api_key = "{secret}"',
+        reasoning="Source declaration found.",
+        confidence=0.9,
+        verification_status=VerificationStatus.CONFIRMED,
+        discovered_by="static",
+    )
+
+    assert secret not in evidence.excerpt
+    store = EvidenceStore(tmp_path / "data", "proj-1")
+    store.save(evidence)
+    assert secret not in next(store.dir.glob("*.json")).read_text(encoding="utf-8")
+
+
 def test_walker_confines_paths(tmp_path):
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
@@ -81,10 +99,42 @@ def test_walker_walk_and_read(tmp_path):
     assert not any("node_modules" in p for p in paths)
 
 
+def test_walker_excludes_symlinked_file_outside_repository(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside-root sentinel", encoding="utf-8")
+    linked = repo / "linked.txt"
+    try:
+        linked.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"Symlink creation is unavailable in this environment: {exc}")
+
+    tree = RepositoryWalker(repo).walk()
+    discovered = next(file for file in tree.files if file.relative_path == "linked.txt")
+    assert discovered.excluded is True
+    assert discovered.exclusion_reason == "symlink_outside_root"
+    assert discovered.size_bytes == 0
+
+
 def test_project_id_derivation_stable():
     pid1 = derive_project_id("/tmp/repo", "abc123")
     pid2 = derive_project_id("/tmp/repo", "abc123")
     assert pid1 == pid2
+
+
+def test_repository_fingerprint_changes_for_same_size_source_edit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "main.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    walker = RepositoryWalker(repo)
+    before = walker.repository_fingerprint()
+
+    source.write_text("y = 1\n", encoding="utf-8")
+    after = walker.repository_fingerprint()
+
+    assert before != after
 
 
 def test_knowledge_store_roundtrip(tmp_path):
