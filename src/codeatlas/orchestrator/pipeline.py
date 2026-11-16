@@ -195,7 +195,7 @@ class Orchestrator:
         )
         knowledge.unknowns = detect_gaps(knowledge)
 
-        evidence_store = EvidenceStore(self.data_dir, ctx.project_id)
+        evidence_store = EvidenceStore(self.data_dir, ctx.project_id, knowledge.analysis_run_id)
         evidence_store.save_many(all_evidence)
 
         knowledge_store = KnowledgeStore(self.data_dir)

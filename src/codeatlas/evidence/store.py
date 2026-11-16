@@ -1,9 +1,9 @@
 """File-based Evidence store — see ARCHITECTURE.md §2, §4.
 
 Each Evidence record is written as its own JSON file, keyed by
-``evidence_id``, under ``<data_dir>/<project_id>/evidence/``. Keeping
-evidence out of the SQLite knowledge DB makes individual findings easy to
-diff, audit, and inspect without a database client.
+``evidence_id``, under ``<data_dir>/<project_id>/evidence/<run_id>/``.
+Keeping evidence out of the SQLite knowledge DB makes individual findings
+easy to diff, audit, and inspect without a database client.
 """
 
 from __future__ import annotations
@@ -15,15 +15,20 @@ from codeatlas.evidence.schema import Evidence
 
 
 class EvidenceStore:
-    def __init__(self, data_dir: str | Path, project_id: str):
+    def __init__(self, data_dir: str | Path, project_id: str, analysis_run_id: str | None = None):
         self.project_id = project_id
-        self.dir = Path(data_dir) / project_id / "evidence"
+        self.analysis_run_id = analysis_run_id
+        evidence_root = Path(data_dir) / project_id / "evidence"
+        # ``None`` retains the legacy flat directory behavior for callers
+        # explicitly inspecting pre-run-scoped artifacts.
+        self.dir = evidence_root / analysis_run_id if analysis_run_id else evidence_root
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, evidence_id: str) -> Path:
         return self.dir / f"{evidence_id}.json"
 
     def save(self, evidence: Evidence) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
         self._path_for(evidence.evidence_id).write_text(
             evidence.model_dump_json(indent=2), encoding="utf-8"
         )

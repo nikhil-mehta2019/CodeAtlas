@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL,
     root_path TEXT NOT NULL,
     schema_version TEXT NOT NULL,
-    analyzed_at TEXT NOT NULL
+    analyzed_at TEXT NOT NULL,
+    analysis_run_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_sections (
@@ -72,7 +73,14 @@ class KnowledgeStore:
         self.db_path = self.data_dir / "knowledge.db"
         self._conn = sqlite3.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
+        self._migrate_projects_schema()
         self._conn.commit()
+
+    def _migrate_projects_schema(self) -> None:
+        """Add run identity to databases created before run-scoped evidence."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(projects)")}
+        if "analysis_run_id" not in columns:
+            self._conn.execute("ALTER TABLE projects ADD COLUMN analysis_run_id TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -86,17 +94,19 @@ class KnowledgeStore:
     def save(self, knowledge: ProjectKnowledge) -> None:
         cur = self._conn.cursor()
         cur.execute(
-            """INSERT INTO projects (project_id, name, root_path, schema_version, analyzed_at)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO projects (project_id, name, root_path, schema_version, analyzed_at, analysis_run_id)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(project_id) DO UPDATE SET
                  name=excluded.name, root_path=excluded.root_path,
-                 schema_version=excluded.schema_version, analyzed_at=excluded.analyzed_at""",
+                 schema_version=excluded.schema_version, analyzed_at=excluded.analyzed_at,
+                 analysis_run_id=excluded.analysis_run_id""",
             (
                 knowledge.project_id,
                 knowledge.name,
                 knowledge.root_path,
                 knowledge.schema_version,
                 knowledge.analyzed_at.isoformat(),
+                knowledge.analysis_run_id,
             ),
         )
         dumped = knowledge.model_dump(mode="json")
@@ -117,12 +127,12 @@ class KnowledgeStore:
     def load(self, project_id: str) -> ProjectKnowledge | None:
         cur = self._conn.cursor()
         row = cur.execute(
-            "SELECT name, root_path, schema_version, analyzed_at FROM projects WHERE project_id = ?",
+            "SELECT name, root_path, schema_version, analyzed_at, analysis_run_id FROM projects WHERE project_id = ?",
             (project_id,),
         ).fetchone()
         if row is None:
             return None
-        name, root_path, schema_version, analyzed_at = row
+        name, root_path, schema_version, analyzed_at, analysis_run_id = row
 
         import json as _json
 
@@ -142,6 +152,8 @@ class KnowledgeStore:
             "analyzed_at": analyzed_at,
             **sections,
         }
+        if analysis_run_id:
+            data["analysis_run_id"] = analysis_run_id
         return ProjectKnowledge.model_validate(data)
 
     def load_section(self, project_id: str, section: str) -> object | None:

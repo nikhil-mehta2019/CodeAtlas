@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Generic, TypeVar
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -282,6 +283,7 @@ class Unknown(BaseModel):
 class ProjectKnowledge(BaseModel):
     schema_version: str = SCHEMA_VERSION
     project_id: str
+    analysis_run_id: str = Field(default_factory=lambda: uuid4().hex[:12])
     name: str
     root_path: str
     analyzed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

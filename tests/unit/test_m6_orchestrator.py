@@ -22,7 +22,7 @@ def test_full_pipeline_on_python_fastapi_fixture(tmp_path):
     # Evidence actually persisted to disk and re-loadable.
     from codeatlas.evidence.store import EvidenceStore
 
-    store = EvidenceStore(tmp_path / "data", run.knowledge.project_id)
+    store = EvidenceStore(tmp_path / "data", run.knowledge.project_id, run.knowledge.analysis_run_id)
     loaded = store.load_all()
     assert len(loaded) > 0
 
@@ -76,7 +76,7 @@ def test_authentication_and_authorization_evidence_is_propagated(tmp_path):
     # not fabricated placeholders.
     from codeatlas.evidence.store import EvidenceStore
 
-    store = EvidenceStore(tmp_path / "data", run.knowledge.project_id)
+    store = EvidenceStore(tmp_path / "data", run.knowledge.project_id, run.knowledge.analysis_run_id)
     persisted_ids = {e.evidence_id for e in store.load_all()}
     for ref in authn.evidence + authz.evidence + authn.mechanism.evidence + authz.model.evidence:
         assert ref.evidence_id in persisted_ids
@@ -117,3 +117,27 @@ def test_environment_configuration_keys_are_reported_without_values(tmp_path):
         {"key": "DB", "required": None, "source_file": ".env.example", "description": None},
         {"key": "local_flag", "required": None, "source_file": ".env.example", "description": None},
     ]
+
+
+def test_reanalysis_keeps_evidence_isolated_by_run(tmp_path):
+    data_dir = tmp_path / "data"
+    orchestrator = Orchestrator(data_dir=data_dir)
+    first = orchestrator.run(str(FIXTURES / "python_fastapi"))
+    second = orchestrator.run(str(FIXTURES / "python_fastapi"))
+
+    assert first.knowledge.project_id == second.knowledge.project_id
+    assert first.knowledge.analysis_run_id != second.knowledge.analysis_run_id
+
+    from codeatlas.evidence.store import EvidenceStore
+    from codeatlas.knowledge.store import KnowledgeStore
+
+    first_ids = {e.evidence_id for e in EvidenceStore(data_dir, first.knowledge.project_id, first.knowledge.analysis_run_id).load_all()}
+    second_ids = {e.evidence_id for e in EvidenceStore(data_dir, second.knowledge.project_id, second.knowledge.analysis_run_id).load_all()}
+    assert first_ids
+    assert second_ids
+    assert first_ids.isdisjoint(second_ids)
+
+    with KnowledgeStore(data_dir) as store:
+        current = store.load(second.knowledge.project_id)
+    assert current is not None
+    assert current.analysis_run_id == second.knowledge.analysis_run_id

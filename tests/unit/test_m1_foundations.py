@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from codeatlas.evidence.schema import (
@@ -152,6 +154,34 @@ def test_knowledge_store_roundtrip(tmp_path):
     assert loaded is not None
     assert loaded.overview.name.value == "Demo"
     store.close()
+
+
+def test_knowledge_store_migrates_pre_run_id_database(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_path = data_dir / "knowledge.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """CREATE TABLE projects (
+                project_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_path TEXT NOT NULL,
+                schema_version TEXT NOT NULL,
+                analyzed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO projects VALUES (?, ?, ?, ?, ?)",
+            ("legacy", "Legacy", "/tmp/legacy", "0.1.0", "2026-01-01T00:00:00+00:00"),
+        )
+
+    with KnowledgeStore(data_dir) as store:
+        columns = {row[1] for row in store._conn.execute("PRAGMA table_info(projects)")}
+        legacy = store.load("legacy")
+
+    assert "analysis_run_id" in columns
+    assert legacy is not None
+    assert legacy.analysis_run_id
 
 
 def test_evidence_store_roundtrip(tmp_path):
